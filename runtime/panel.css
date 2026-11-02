@@ -1,0 +1,459 @@
+/* AGENTS.md 面板：工具条按钮 + 遮罩 + 可拖宽的右侧抽屉。只作用于本插件自己的节点。 */
+
+/* ── 工具栏按钮 ───────────────────────────────────────────────── */
+
+.agv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  margin: 0 2px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.62;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+.agv-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.agv-btn:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.agv-btn svg {
+  display: block;
+}
+
+/* ── 遮罩 ─────────────────────────────────────────────────────── */
+
+.agv-backdrop {
+  position: fixed;
+  inset: 0;
+  display: none;
+  background: rgba(0, 0, 0, 0.28);
+  z-index: 2147482998;
+}
+
+.agv-backdrop[data-open] {
+  display: block;
+}
+
+/* ── 抽屉 ─────────────────────────────────────────────────────── */
+
+.agv-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(440px, 80vw);
+  box-sizing: border-box;
+  display: none;
+  flex-direction: column;
+  background: #14161c;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: -18px 0 40px rgba(0, 0, 0, 0.4);
+  z-index: 2147483000;
+  font-family: ui-monospace, "Geist Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  color: #e6e8ee;
+}
+
+.agv-drawer[data-open] {
+  display: flex;
+}
+
+.agv-drawer[data-resizing] {
+  user-select: none;
+}
+
+/* 左边缘拖拽条 */
+.agv-resizer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 3;
+}
+
+.agv-resizer:hover,
+.agv-drawer[data-resizing] .agv-resizer {
+  background: rgba(120, 160, 255, 0.4);
+}
+
+/* 左侧收起条：贴在抽屉外面 */
+.agv-handle {
+  position: absolute;
+  left: -22px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #14161c;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  color: #e6e8ee;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  z-index: 4;
+}
+
+.agv-handle:hover {
+  background: #1d2029;
+}
+
+/* ── 头部 ─────────────────────────────────────────────────────── */
+
+.agv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.agv-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.agv-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.agv-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.agv-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 7px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  opacity: 0.75;
+  font-size: 11.5px;
+  overflow: hidden;
+}
+
+.agv-meta-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agv-meta-ver {
+  flex: none;
+  margin-left: auto;
+  opacity: 0.6;
+}
+
+.agv-meta-ver + .agv-meta-ver {
+  margin-left: 6px;
+}
+
+/* ── 文件列表 ─────────────────────────────────────────────────── */
+
+.agv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 6px 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  max-height: 32vh;
+  overflow: auto;
+  flex: none;
+}
+
+.agv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agv-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.agv-row[data-active] {
+  background: rgba(90, 140, 255, 0.16);
+}
+
+.agv-row[data-missing] {
+  opacity: 0.42;
+}
+
+.agv-scope {
+  flex: none;
+  width: 3.2em;
+  opacity: 0.7;
+}
+
+.agv-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agv-size {
+  flex: none;
+  opacity: 0.5;
+  font-size: 11px;
+}
+
+/* ── 编辑器与底部 ─────────────────────────────────────────────── */
+
+.agv-editor {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  outline: none;
+  padding: 12px 12px 12px 16px;
+  background: #0e1015;
+  color: #dfe3ec;
+  font: inherit;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.agv-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.agv-status {
+  flex: 1;
+  opacity: 0.66;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agv-save {
+  flex: none;
+  padding: 5px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.agv-save:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.agv-save:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* --- close button moved to the left: the top-right corner is owned by
+       the native window controls, which swallow clicks there. --- */
+.agv-head {
+  justify-content: flex-start;
+}
+
+.agv-close {
+  order: -1;
+}
+
+.agv-title {
+  flex: 1;
+}
+/* --- 去掉右上角的关闭按钮：关闭走左侧收起条 / Esc / 点遮罩 --- */
+.agv-close {
+  display: none !important;
+}
+/* --- 右侧拖拽条：调原生侧边栏宽度 --- */
+.agv-resizer-r {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 3;
+}
+
+.agv-resizer-r:hover {
+  background: rgba(120, 160, 255, 0.4);
+}
+/* --- 侧栏开着时按钮的淡提示 --- */
+.agv-hint {
+  position: fixed;
+  transform: translateX(-50%);
+  padding: 5px 10px;
+  border-radius: 7px;
+  background: rgba(18, 20, 26, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #cfd3dd;
+  font-family: ui-monospace, "Geist Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+  z-index: 2147483100;
+}
+
+.agv-hint[data-show] {
+  opacity: 0.7;
+}
+/* --- 行高与左侧对齐后，文字贴底而不是居中 --- */
+.agv-head {
+  align-items: flex-end;
+  padding-bottom: 9px;
+  box-sizing: border-box;
+}
+
+.agv-meta {
+  align-items: flex-end;
+  padding-bottom: 7px;
+  box-sizing: border-box;
+}
+
+/* --- 内部顶部留白 + 两条横线对齐左侧（不动抽屉外框） --- */
+.agv-topspace {
+  flex: none;
+  height: 39px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.agv-head {
+  flex: none;
+  height: 50px;
+  box-sizing: border-box;
+  align-items: flex-end;
+  padding-top: 0;
+  padding-bottom: 8px;
+}
+
+.agv-meta {
+  flex: none;
+  height: 42px;
+  box-sizing: border-box;
+  align-items: flex-end;
+  padding-top: 0;
+  padding-bottom: 6px;
+}
+/* --- 外层保持满高（拖拽条不动），内层做成卡片 --- */
+.agv-drawer {
+  background: transparent;
+  border-left: 0;
+  box-shadow: none;
+}
+
+.agv-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 39px 10px 10px 0;
+  background: #14161c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.agv-topspace {
+  display: none;
+}
+/* --- dock 模式：贴在原生右侧边栏的矩形里 --- */
+.agv-drawer[data-dock] {
+  right: auto;
+  border-left: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.agv-drawer[data-dock] .agv-resizer,
+.agv-drawer[data-dock] .agv-handle {
+  display: none;
+}
+/* --- 侧栏页签条上的入口 chip --- */
+.agv-chip {
+  flex: none;
+  align-self: center;
+  margin-left: 6px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.agv-chip:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+/* --- dock 模式：去掉卡片留白，四边完全贴合 --- */
+.agv-drawer[data-dock] .agv-card {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.agv-drawer[data-dock] {
+  background: #14161c;
+}
+
+/* 首帧还没量到侧栏宽度前先不显示，避免"先小后跳" */
+.agv-drawer[data-open][data-pending] {
+  visibility: hidden;
+}
