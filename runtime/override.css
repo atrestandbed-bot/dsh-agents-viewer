@@ -1,0 +1,24 @@
+/*
+ * 宿主注入的 UI 覆盖层。
+ *
+ * 这个文件由 index.js 在每次 index 请求时现读，所以改完这里只要刷新页面
+ * （Ctrl+F5）就能生效，不需要重启 DSH。
+ *
+ * 主要目的：编辑区宽度固定为面板宽度，超长行自动换行，不出现横向滚动。
+ */
+.agv2-editor,
+.agv-editor {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.agv2-root {
+  width: 100% !important;
+  min-width: 0 !important;
+}

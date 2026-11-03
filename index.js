@@ -3,18 +3,17 @@
  *
  * 两个面：
  *   ① 命令 /agents：列表 / 看全文 / 外部编辑器打开 / 新建
- *   ② 界面：聊天区右上角一个按钮，点开侧边抽屉，直接在界面里读改写
+ *   ② 界面：DSH 右侧栏里的原生 AGENTS.md tab。客户端用
+ *      `ctx.sidebarRightTabs.register` 注册类型，用 `sidebar.right.pane.tab`
+ *      槽挂正文。
  *
- * 界面走「宿主注入 + HTTP 路由」，和 dsh-video-skin 同一套机制：
- *   - `webserver/index-inject` 往页面塞一行 style + 一行 script
- *   - `webServer.register` 暴露 /dsh-agents-viewer/* 读写接口
- *   - 注入的脚本建按钮和抽屉，同源 fetch 自己的接口
- *
- * ⚠️ 只适配 DSH 44.7.0。版本一变就跳过注入（按钮消失、其余功能不受影响），
- * 因为按钮是按当前界面的 DOM 结构定位的，界面一改就会错位。
+ * 宿主负责 HTTP 路由（/list /read /write /ui）和 /agents 命令；另外注入
+ * 一层可热改的 `runtime/override.css`——它在每次 index 请求时现读，所以
+ * 改样式只要刷新页面，不用重启。
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,16 +21,8 @@ import { fileURLToPath } from "node:url";
 /** Cordis 插件名。 */
 export const name = "dsh-agents-viewer";
 
-/**
- * 没有必需服务。
- *
- * `webserver/index-inject` 的监听必须在 apply 里同步登记 —— 对象级 inject 会把
- * apply 推迟到服务就绪之后，那时注入表可能已经收集完了。
- */
+/** 没有必需服务；路由通过 ctx.inject 延迟挂载。 */
 export const inject = [];
-
-/** 这个版本号是面板定位所依赖的界面版本的锚点。 */
-export const SUPPORTED_DSH_VERSION = "44.7.0";
 
 const ROUTE_PREFIX = "/dsh-agents-viewer";
 const GLOBAL_FILE = "AGENTS.md";
@@ -49,8 +40,10 @@ const USAGE = [
   "  /agents n              新建项目级 AGENTS.md（项目根）",
   "  /agents n global       新建全局 AGENTS.md（~/.dsh）",
   "  /agents n shared       新建共享 AGENTS.md（~/.agents）",
+  "  /agents o              显示聊天头部的 AGENTS.md 按钮",
+  "  /agents c              隐藏聊天头部的 AGENTS.md 按钮",
   "  /agents help           只看这份说明",
-  "  右上角按钮             打开侧边面板，直接在界面里改",
+  "  右侧栏 AGENTS.md tab    在界面里直接读改写（原生 tab，不再有浮动面板）",
 ].join("\n");
 
 const NEW_FILE_TEMPLATE = `# 项目规则
@@ -310,33 +303,7 @@ function openInEditor(file) {
   });
 }
 
-// ── 版本闸门 ──────────────────────────────────────────────────────────
-
-/** 读 DSH 应用版本（安装根目录的 `version` 文件）。 */
-function readDshVersion() {
-  const candidates = [];
-  try {
-    if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, "..", "version"));
-  } catch {
-    /* 非 Electron 环境没有 resourcesPath */
-  }
-  try {
-    candidates.push(path.join(path.dirname(process.execPath), "version"));
-  } catch {
-    /* ignore */
-  }
-  for (const file of candidates) {
-    try {
-      const text = fs.readFileSync(file, "utf8").trim();
-      if (text) return text;
-    } catch {
-      /* 试下一个 */
-    }
-  }
-  return null;
-}
-
-// ── 面板数据 ──────────────────────────────────────────────────────────
+// ── 项目与指令链 ───────────────────────────────────────────────────────
 
 const SESSION_PATTERN = /session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -370,19 +337,63 @@ function resolveProject(hint) {
   return { path: process.cwd(), source: "cwd" };
 }
 
-function allowedFiles(projectPath) {
+/**
+ * 指令链的完整白名单：全局 / 共享 + 项目根到会话 cwd 的每一层目录。
+ * 与 `/agents` 命令的 `collect()` 同一口径，面板不再只认项目根那 4 个文件。
+ */
+function instructionEntries(projectPath) {
   const root = findProjectRoot(projectPath);
   const list = [
-    { scope: "全局", key: "global", path: path.join(dshHome(), GLOBAL_FILE) },
-    { scope: "共享", key: "shared", path: path.join(agentsHome(), GLOBAL_FILE) },
+    { scope: "全局", label: "~/.dsh", key: "global", path: path.join(dshHome(), GLOBAL_FILE) },
+    { scope: "共享", label: "~/.agents", key: "shared", path: path.join(agentsHome(), GLOBAL_FILE) },
   ];
-  for (const fileName of PROJECT_FILES) {
-    list.push({ scope: "项目", key: `project:${fileName}`, path: path.join(root, fileName) });
+  for (const dir of directoryChain(projectPath, root)) {
+    const rel = path.relative(root, dir) || ".";
+    const scope = dir === root ? "项目" : "子目录";
+    for (const fileName of PROJECT_FILES) {
+      list.push({
+        scope,
+        label: rel,
+        key: `project:${dir}:${fileName}`,
+        path: path.join(dir, fileName),
+      });
+    }
   }
   return { list, root };
 }
 
 const normalize = (p) => path.resolve(String(p)).toLowerCase();
+
+// ── 聊天头部按钮的开关 ────────────────────────────────────────────────
+
+const UI_FILE = "dsh-agents-viewer.ui.json";
+
+function readUiState() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dshHome(), "storages", UI_FILE), "utf8"));
+    return { button: raw?.button !== false };
+  } catch {
+    return { button: true };
+  }
+}
+
+function writeUiState(state) {
+  const file = path.join(dshHome(), "storages", UI_FILE);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ button: state.button !== false }, null, 2) + "\n", "utf8");
+}
+
+let uiButtonVisible;
+
+function currentUiState() {
+  if (uiButtonVisible === undefined) uiButtonVisible = readUiState().button;
+  return { button: uiButtonVisible };
+}
+
+function setUiButtonVisible(value) {
+  writeUiState({ button: value });
+  uiButtonVisible = value;
+}
 
 // ── HTTP 小工具 ───────────────────────────────────────────────────────
 
@@ -417,49 +428,24 @@ function readBody(req) {
 // ── 插件入口 ──────────────────────────────────────────────────────────
 
 export function apply(ctx) {
-  const warn = (message) => {
-    try {
-      ctx.logger?.warn?.(`[${name}] ${message}`);
-    } catch {
-      /* 日志不该成为失败原因 */
-    }
-  };
-
   const packageRoot = path.dirname(fileURLToPath(import.meta.url));
-
-  const readRuntime = (file) => {
+  const overrideFile = path.join(packageRoot, "runtime", "override.css");
+  const readOverride = () => {
     try {
-      return fs.readFileSync(path.join(packageRoot, "runtime", file), "utf8");
-    } catch (error) {
-      warn(`读取 runtime/${file} 失败：${error instanceof Error ? error.message : String(error)}`);
+      return fs.readFileSync(overrideFile, "utf8");
+    } catch {
       return "";
     }
   };
 
-  const version = readDshVersion();
-  const versionOk = version === null ? false : version === SUPPORTED_DSH_VERSION;
-  if (!versionOk) {
-    warn(
-      `DSH 版本 ${version ?? "未知"} 与适配版本 ${SUPPORTED_DSH_VERSION} 不一致，` +
-        `已跳过界面注入（按钮不会出现）。/agents 命令不受影响。`,
-    );
-  }
-
-  // ① 注入行：同步登记。
+  // 可热改的 CSS 覆盖层：每次 index 请求现读文件，改完刷新页面即可。
   ctx.on("webserver/index-inject", (table) => {
-    if (!Array.isArray(table) || !versionOk) return;
-    try {
-      const css = readRuntime("panel.css");
-      const js = readRuntime("panel.js");
-      if (!js) return;
-      table.push({ kind: "style", text: css });
-      table.push({ kind: "script", placement: "body", text: js });
-    } catch (error) {
-      warn(`注入行生成失败：${error instanceof Error ? error.message : String(error)}`);
-    }
+    if (!Array.isArray(table)) return;
+    const css = readOverride();
+    if (css) table.push({ kind: "style", text: css });
   });
 
-  // ② 路由。
+  // ① 路由。
   ctx.inject(["webServer"], (child) => {
     child.effect(() => {
       const disposers = [];
@@ -472,15 +458,20 @@ export function apply(ctx) {
             try {
               const url = new URL(req.url ?? "/", "http://127.0.0.1");
               const project = resolveProject(url.searchParams.get("hint") ?? "");
-              const { list, root } = allowedFiles(project.path);
+              const { list, root } = instructionEntries(project.path);
               const files = list.map((entry) => {
                 const info = readFileInfo(entry.path);
-                return { scope: entry.scope, key: entry.key, path: entry.path, exists: info !== null, size: info?.size ?? 0 };
+                return {
+                  scope: entry.scope,
+                  label: entry.label,
+                  key: entry.key,
+                  path: entry.path,
+                  exists: info !== null,
+                  size: info?.size ?? 0,
+                };
               });
               sendJson(res, 200, {
                 ok: true,
-                dshVersion: version,
-                versionOk,
                 project: project.path,
                 source: project.source,
                 root,
@@ -502,7 +493,7 @@ export function apply(ctx) {
               const url = new URL(req.url ?? "/", "http://127.0.0.1");
               const target = url.searchParams.get("path") ?? "";
               const project = resolveProject(url.searchParams.get("hint") ?? "");
-              const { list } = allowedFiles(project.path);
+              const { list } = instructionEntries(project.path);
               if (!list.some((entry) => normalize(entry.path) === normalize(target))) {
                 sendJson(res, 403, { ok: false, error: "这个路径不在 AGENTS.md 指令链里，拒绝读写。" });
                 return;
@@ -528,7 +519,7 @@ export function apply(ctx) {
               }
               const body = JSON.parse((await readBody(req)) || "{}");
               const project = resolveProject(body?.hint ?? "");
-              const { list } = allowedFiles(project.path);
+              const { list } = instructionEntries(project.path);
               const target = String(body?.path ?? "");
               if (!list.some((entry) => normalize(entry.path) === normalize(target))) {
                 sendJson(res, 403, { ok: false, error: "这个路径不在 AGENTS.md 指令链里，拒绝写入。" });
@@ -538,6 +529,58 @@ export function apply(ctx) {
               fs.writeFileSync(target, String(body?.content ?? ""), "utf8");
               const info = readFileInfo(target);
               sendJson(res, 200, { ok: true, path: target, size: info?.size ?? 0 });
+            } catch (error) {
+              sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+            }
+          },
+        }),
+      );
+
+      disposers.push(
+        child.webServer.register({
+          kind: "exact",
+          path: `${ROUTE_PREFIX}/debug`,
+          handler: (req, res) => {
+            try {
+              const loader = ctx.get("loader");
+              const cm = ctx.get("clientModules");
+              let resolved = null;
+              let resolveError = null;
+              try {
+                resolved = createRequire(ctx.baseUrl).resolve("dsh-agents-viewer/package.json");
+              } catch (error) {
+                resolveError = `${error?.code ?? ""}: ${error instanceof Error ? error.message : String(error)}`;
+              }
+              const entries = loader
+                ? [...loader.entries()].map((entry) => ({
+                    name: entry.options?.name,
+                    fiber: entry.fiber !== undefined,
+                    disabled: entry.disabled === true,
+                  }))
+                : null;
+              sendJson(res, 200, {
+                ok: true,
+                baseUrl: ctx.baseUrl,
+                resolved,
+                resolveError,
+                clientPath: cm?.clientPath?.("dsh-agents-viewer") ?? null,
+                graph: cm?.graph?.() ?? null,
+                entries,
+              });
+            } catch (error) {
+              sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
+            }
+          },
+        }),
+      );
+
+      disposers.push(
+        child.webServer.register({
+          kind: "exact",
+          path: `${ROUTE_PREFIX}/ui`,
+          handler: (req, res) => {
+            try {
+              sendJson(res, 200, { ok: true, ...currentUiState() });
             } catch (error) {
               sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
             }
@@ -557,13 +600,35 @@ export function apply(ctx) {
     });
   });
 
-  // ③ 命令。
+  // ② 命令。
   ctx.inject(["commands", "workingDirectory"], (child) => {
     child.commands.register({
       name: "agents",
       description: "查看并编辑全局、共享与项目级的 AGENTS.md",
-      input: { hint: "[序号] 看 · all 全部 · w <序号> 编辑 · n 新建 · help 用法" },
+      input: { hint: "[序号] 看 · all 全部 · w <序号> 编辑 · n 新建 · o 显示按钮 · c 隐藏按钮 · help 用法" },
       handler: async ({ agent, rawInput }) => {
+        const arg = String(rawInput ?? "").trim();
+
+        if (arg === "o" || arg === "show") {
+          try {
+            setUiButtonVisible(true);
+            return { kind: "success", text: "已记录：AGENTS.md 按钮将在下次启动 DSH 后显示。" };
+          } catch (error) {
+            return { kind: "error", text: `写入按钮状态失败：${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
+
+        if (arg === "c" || arg === "hide") {
+          try {
+            setUiButtonVisible(false);
+            return { kind: "success", text: "已记录：AGENTS.md 按钮将在下次启动 DSH 后隐藏。" };
+          } catch (error) {
+            return { kind: "error", text: `写入按钮状态失败：${error instanceof Error ? error.message : String(error)}` };
+          }
+        }
+
+        if (arg === "help" || arg === "?" || arg === "-h") return { kind: "success", text: USAGE };
+
         let cwd;
         try {
           cwd = await child.workingDirectory.ensure(agent);
@@ -572,10 +637,8 @@ export function apply(ctx) {
         }
 
         const listed = renderList(collect(cwd));
-        const arg = String(rawInput ?? "").trim();
 
         if (arg === "") return { kind: "success", text: listed.text };
-        if (arg === "help" || arg === "?" || arg === "-h") return { kind: "success", text: USAGE };
 
         if (arg === "n" || arg === "new" || arg.startsWith("n ") || arg.startsWith("new ")) {
           const kind = arg.replace(/^(n|new)\s*/, "").trim() || "project";
