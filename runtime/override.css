@@ -6,8 +6,7 @@
  *
  * 主要目的：编辑区宽度固定为面板宽度，超长行自动换行，不出现横向滚动。
  */
-.agv2-editor,
-.agv-editor {
+.agv2-editor {
   white-space: pre-wrap !important;
   overflow-wrap: anywhere !important;
   word-break: break-word !important;

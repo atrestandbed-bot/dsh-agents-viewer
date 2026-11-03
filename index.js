@@ -13,7 +13,6 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,8 +39,8 @@ const USAGE = [
   "  /agents n              新建项目级 AGENTS.md（项目根）",
   "  /agents n global       新建全局 AGENTS.md（~/.dsh）",
   "  /agents n shared       新建共享 AGENTS.md（~/.agents）",
-  "  /agents o              显示聊天头部的 AGENTS.md 按钮",
-  "  /agents c              隐藏聊天头部的 AGENTS.md 按钮",
+  "  /agents o              记录显示按钮（下次启动生效）",
+  "  /agents c              记录隐藏按钮（下次启动生效）",
   "  /agents help           只看这份说明",
   "  右侧栏 AGENTS.md tab    在界面里直接读改写（原生 tab，不再有浮动面板）",
 ].join("\n");
@@ -529,44 +528,6 @@ export function apply(ctx) {
               fs.writeFileSync(target, String(body?.content ?? ""), "utf8");
               const info = readFileInfo(target);
               sendJson(res, 200, { ok: true, path: target, size: info?.size ?? 0 });
-            } catch (error) {
-              sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
-            }
-          },
-        }),
-      );
-
-      disposers.push(
-        child.webServer.register({
-          kind: "exact",
-          path: `${ROUTE_PREFIX}/debug`,
-          handler: (req, res) => {
-            try {
-              const loader = ctx.get("loader");
-              const cm = ctx.get("clientModules");
-              let resolved = null;
-              let resolveError = null;
-              try {
-                resolved = createRequire(ctx.baseUrl).resolve("dsh-agents-viewer/package.json");
-              } catch (error) {
-                resolveError = `${error?.code ?? ""}: ${error instanceof Error ? error.message : String(error)}`;
-              }
-              const entries = loader
-                ? [...loader.entries()].map((entry) => ({
-                    name: entry.options?.name,
-                    fiber: entry.fiber !== undefined,
-                    disabled: entry.disabled === true,
-                  }))
-                : null;
-              sendJson(res, 200, {
-                ok: true,
-                baseUrl: ctx.baseUrl,
-                resolved,
-                resolveError,
-                clientPath: cm?.clientPath?.("dsh-agents-viewer") ?? null,
-                graph: cm?.graph?.() ?? null,
-                entries,
-              });
             } catch (error) {
               sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
             }

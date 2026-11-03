@@ -446,7 +446,21 @@ window.__ModuleLoader__.load({
 
     function apply(ctx) {
       openAgentsTab = function () {
-        ctx.sidebarRight.openTab("agents");
+        var right = ctx.sidebarRight;
+        var active;
+        var expanded = false;
+        try {
+          active = right.active();
+          expanded = right.isExpanded();
+        } catch (error) {
+          /* 没有在屏会话时退回 openTab */
+        }
+        // 已经展开、且当前 tab 就是 AGENTS.md：再点一次收起侧栏。
+        if (expanded && active && active.kind === "agents") {
+          right.toggleExpanded();
+          return;
+        }
+        right.openTab("agents");
       };
 
       ctx.effect(function () {
