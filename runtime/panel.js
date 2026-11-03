@@ -101,10 +101,6 @@
   function syncLayout() {
     if (!drawer) return;
     var sideEl = nativeSidebarEl();
-    if (sideEl && state.sideW) {
-      sideEl.style.width = state.sideW + "px";
-      sideEl.style.minWidth = state.sideW + "px";
-    }
     var side = sideEl ? Math.round(sideEl.getBoundingClientRect().width) : 0;
     if (drawer.__side === side) return;
     drawer.__side = side;
@@ -112,9 +108,6 @@
     drawer.backdrop.style.right = side + "px";
   }
 
-  // 找到对话列：从工具条按钮往上，第一个够高够宽的祖先。
-  var chatEl = null;
-  var chatOrigMargin = null;
 
 
 
@@ -243,8 +236,9 @@
 
   // ── 抽屉 ──────────────────────────────────────────────────────────
 
+var state = { files: [], current: null, loaded: "", dirty: false, saving: false, width: loadWidth() };
+
   var drawer = null;
-  var state = { files: [], current: null, loaded: "", dirty: false, saving: false, width: loadWidth(), sideW: null };
 
   function el(tagName, className, text) {
     var node = document.createElement(tagName);
@@ -266,10 +260,6 @@
     root.style.width = state.width + "px";
 
     // 左边缘拖拽条
-    // 顶部留白：让第一条横线落在和左侧卡片顶部相同的高度。
-    var topspace = el("div", TAG + "-topspace");
-    topspace.setAttribute("data-agv", "topspace");
-    card.appendChild(topspace);
 
     var resizer = el("div", TAG + "-resizer");
     resizer.setAttribute("data-agv", "resizer");
@@ -308,36 +298,6 @@
     });
     root.appendChild(resizer);
     // 右界线：拖它改原生侧边栏宽度，面板随之让位。
-    var resizerR = el("div", TAG + "-resizer-r");
-    resizerR.setAttribute("data-agv", "resizer-r");
-    resizerR.addEventListener("pointerdown", function (e) {
-      var sideEl = nativeSidebarEl();
-      if (!sideEl) return;
-      e.preventDefault();
-      e.stopPropagation();
-      var startX = e.clientX;
-      var startW = sideEl.getBoundingClientRect().width;
-      try { resizerR.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-      function onMove(ev) {
-        var max = Math.min(900, Math.round(window.innerWidth * 0.6));
-        var w = Math.max(240, Math.min(Math.round(startW + (startX - ev.clientX)), max));
-        state.sideW = w;
-        sideEl.style.width = w + "px";
-        sideEl.style.minWidth = w + "px";
-        drawer.__side = -1;
-        syncLayout();
-      }
-      function onUp(ev) {
-        try { resizerR.releasePointerCapture(ev.pointerId); } catch (err) { /* ignore */ }
-        resizerR.removeEventListener("pointermove", onMove);
-        resizerR.removeEventListener("pointerup", onUp);
-        resizerR.removeEventListener("pointercancel", onUp);
-      }
-      resizerR.addEventListener("pointermove", onMove);
-      resizerR.addEventListener("pointerup", onUp);
-      resizerR.addEventListener("pointercancel", onUp);
-    });
-    root.appendChild(resizerR);
 
 
     // 左侧收起条：箭头朝右（面板在右边，往右收起）
@@ -572,22 +532,29 @@
 
 
   // 侧栏左边界：从页签往上找，取最宽但仍贴着窗口右边的那个的左边界。
+  // 侧栏左边界：从"收起右侧边栏"按钮出发取最内层列容器，再把贴在它左边的分隔条算进来。
+
   function sidebarLeft() {
     try {
       var b = document.querySelector('[aria-label="\u6536\u8d77\u53f3\u4fa7\u8fb9\u680f"]');
       if (!b) return 0;
-      var br0 = b.getBoundingClientRect();
-      if (br0.width < 4 || br0.left > window.innerWidth - 4) return 0;
+      var vw = window.innerWidth;
+      var br = b.getBoundingClientRect();
+      if (br.width < 4 || br.left > vw - 4) return 0;
+      // 一直往上走，取最外层但仍"像一列"的容器（宽度不超过窗口 85%）
+      var left = 0;
       var n = b;
       while (n && n !== document.body) {
         var r = n.getBoundingClientRect();
-        if (r.width >= 300 && r.height >= 300 && Math.abs(r.right - window.innerWidth) < 8) {
-          return Math.round(r.left);
+        if (r.height >= 250 && r.width >= 280 && r.width < vw * 0.85) {
+          left = Math.round(r.left);
         }
         n = n.parentElement;
       }
-    } catch (e) { /* ignore */ }
-    return 0;
+      return left;
+    } catch (e) {
+      return 0;
+    }
   }
 
   var dockRaf = 0;
@@ -606,15 +573,19 @@
   }
 
   var lastSig = "";
+  var dockOpenedAt = 0;
+
+  // 面板顶部的可见诊断：把量到的数值写出来，方便截图排查。
 
   function syncDock() {
     if (!drawer || !drawer.root.hasAttribute("data-open")) return;
     var left = sidebarLeft();
     var vw = window.innerWidth;
     var vh = window.innerHeight;
-    var dock = left > 0 && vw - left >= 320;
-    var sig = (dock ? "d" : "o") + ":" + left + ":" + vw + ":" + vh;
-    if (sig === lastSig) return;
+    var dock = left > 0;
+    var settling = (Date.now() - dockOpenedAt) < 1200;
+    var sig = settling ? '' : ((dock ? 'd' : 'o') + ':' + left + ':' + vw + ':' + vh);
+    if (sig !== "" && sig === lastSig) return;
     lastSig = sig;
     if (!dock) {
       if (drawer.root.getAttribute("data-dock") === "1") {
@@ -626,23 +597,24 @@
       drawer.root.style.top = "";
       drawer.root.style.height = "";
       drawer.root.style.width = state.width + "px";
-      /* diagnostics removed */
       drawer.root.removeAttribute('data-pending');
       return;
     }
     drawer.root.setAttribute("data-dock", "1");
     drawer.root.style.right = "auto";
-    drawer.root.style.left = left + "px";
+    // 让出分隔条本身（约 6px），保留 DSH 原生分界线的蓝色 hover
+    var lead = 6;
+    drawer.root.style.left = (left + lead) + "px";
     drawer.root.style.top = "0px";
-    drawer.root.style.width = (vw - left) + "px";
+    drawer.root.style.width = Math.max(120, vw - left - lead) + "px";
     drawer.root.style.height = vh + "px";
-      /* diagnostics removed */
     drawer.root.removeAttribute('data-pending');
   }
 
 
 
   function openDocked() {
+    dockOpenedAt = Date.now();
     if (!drawer) drawer = buildDrawer();
     drawer.root.setAttribute("data-open", "1");
     drawer.root.setAttribute('data-pending', '1');

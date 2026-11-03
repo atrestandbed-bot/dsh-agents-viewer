@@ -316,42 +316,9 @@
   display: none !important;
 }
 /* --- 右侧拖拽条：调原生侧边栏宽度 --- */
-.agv-resizer-r {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 6px;
-  background: transparent;
-  cursor: col-resize;
-  touch-action: none;
-  z-index: 3;
-}
 
-.agv-resizer-r:hover {
-  background: rgba(120, 160, 255, 0.4);
-}
 /* --- 侧栏开着时按钮的淡提示 --- */
-.agv-hint {
-  position: fixed;
-  transform: translateX(-50%);
-  padding: 5px 10px;
-  border-radius: 7px;
-  background: rgba(18, 20, 26, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #cfd3dd;
-  font-family: ui-monospace, "Geist Mono", Menlo, Consolas, monospace;
-  font-size: 11.5px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms ease;
-  z-index: 2147483100;
-}
 
-.agv-hint[data-show] {
-  opacity: 0.7;
-}
 /* --- 行高与左侧对齐后，文字贴底而不是居中 --- */
 .agv-head {
   align-items: flex-end;
@@ -366,11 +333,6 @@
 }
 
 /* --- 内部顶部留白 + 两条横线对齐左侧（不动抽屉外框） --- */
-.agv-topspace {
-  flex: none;
-  height: 39px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-}
 
 .agv-head {
   flex: none;
@@ -408,9 +370,6 @@
   overflow: hidden;
 }
 
-.agv-topspace {
-  display: none;
-}
 /* --- dock 模式：贴在原生右侧边栏的矩形里 --- */
 .agv-drawer[data-dock] {
   right: auto;
@@ -419,29 +378,15 @@
   box-shadow: none;
 }
 
-.agv-drawer[data-dock] .agv-resizer,
+.agv-drawer[data-dock] .agv-resizer {
+  display: none;
+}
+
 .agv-drawer[data-dock] .agv-handle {
   display: none;
 }
 /* --- 侧栏页签条上的入口 chip --- */
-.agv-chip {
-  flex: none;
-  align-self: center;
-  margin-left: 6px;
-  padding: 3px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.05);
-  color: inherit;
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-  white-space: nowrap;
-}
 
-.agv-chip:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
 /* --- dock 模式：去掉卡片留白，四边完全贴合 --- */
 .agv-drawer[data-dock] .agv-card {
   margin: 0;

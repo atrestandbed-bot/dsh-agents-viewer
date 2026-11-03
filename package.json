@@ -1,6 +1,6 @@
 {
   "name": "dsh-agents-viewer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "查看并编辑全局、共享与项目级的 AGENTS.md：侧边栏面板 + /agents 命令",
   "keywords": [
