@@ -64,6 +64,7 @@ icon.svg            图标
 ## 实现要点
 
 - **数据通路**：宿主用 `webServer.register` 暴露接口，页面用同源 `fetch` 调用（与 `dsh-video-skin` 同一套机制）
+- **项目解析**：面板把 DSH 持久化的当前会话（`localStorage` 的 `dsh.sessions.current`）作为 hint 传给宿主，按会话精确解析 workspace；拿不到会话时才回退到最近工作区，标「推断项目」并在保存前确认
 - **安全**：宿主侧白名单，只允许 `~/.dsh/AGENTS.md`、`~/.agents/AGENTS.md`、项目根那 4 个文件名，其余路径一律 403
 - **dock 模式**：点按钮 → 触发 app 自己的「打开右侧边栏」→ 逐帧读侧栏左边界 → 面板铺满从该边界到窗口右下
 - **不闪烁**：`data-pending` 标记，首帧没量到宽度前不显示，避免"先小后大"

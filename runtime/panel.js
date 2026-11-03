@@ -18,6 +18,12 @@
   var MIN_WIDTH = 300;
   var MAX_WIDTH = 900;
 
+  /* DSH 把当前会话选择持久化在 localStorage 的这个键里（createSnapshotStore）。 */
+  var SESSION_KEY = "dsh.sessions.current";
+  var SESSION_RE = /session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  /* 面板开着时会话可能被切走；200ms 一次只读一个几十字节的键，开销可以忽略。 */
+  var SESSION_POLL_MS = 200;
+
   var TITLEBAR_MAX_TOP = 40;
   var HEADER_MAX_TOP = 150;
   var RIGHT_BAND = 560;
@@ -54,6 +60,33 @@
     } catch (e) {
       /* 存不下就算了 */
     }
+  }
+
+  /**
+   * 当前会话 id。优先读 DSH 持久化的选择（同步、零请求），
+   * 读不到再从页面 URL 里找；都没有就返回 null，交给宿主兜底。
+   */
+  function readSessionId() {
+    try {
+      var raw = localStorage.getItem(SESSION_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        var id = parsed && parsed.sessionId;
+        if (typeof id === "string" && SESSION_RE.test(id)) return id;
+      }
+    } catch (e) {
+      /* 存储不可用 */
+    }
+    var match = SESSION_RE.exec(String(location.href || ""));
+    return match ? match[0] : null;
+  }
+
+  /**
+   * 请求宿主时带的 hint：有会话 id 就传它，宿主据此精确解析工作区；
+   * 没有才退回原来的 URL 推断。
+   */
+  function hintValue() {
+    return readSessionId() || location.href;
   }
 
   // ── 探测 ──────────────────────────────────────────────────────────
@@ -236,7 +269,9 @@
 
   // ── 抽屉 ──────────────────────────────────────────────────────────
 
-var state = { files: [], current: null, loaded: "", dirty: false, saving: false, width: loadWidth() };
+var state = { files: [], current: null, loaded: "", dirty: false, saving: false, width: loadWidth(), sessionId: null, project: "", projectSource: "" };
+var listSeq = 0;
+var readSeq = 0;
 
   var drawer = null;
 
@@ -374,6 +409,7 @@ var state = { files: [], current: null, loaded: "", dirty: false, saving: false,
   function closeDrawer() {
     if (!drawer) return;
     if (state.dirty && !armedClose()) return;
+    stopSessionWatch();
     drawer.root.removeAttribute("data-open");
     drawer.backdrop.removeAttribute("data-open");
     syncLayout();
@@ -388,13 +424,16 @@ var state = { files: [], current: null, loaded: "", dirty: false, saving: false,
 
   function renderMeta(data) {
     drawer.meta.innerHTML = "";
-    drawer.meta.appendChild(el("span", TAG + "-meta-label", "项目"));
+    var inferred = data.source !== "session";
+    drawer.meta.appendChild(el("span", TAG + "-meta-label", inferred ? "推断项目" : "项目"));
     var value = el("span", TAG + "-meta-path", data.project || "未知");
-    value.title = data.project || "";
+    value.title = (data.project || "") + (inferred ? "\n（推断，保存前请确认）" : "");
     drawer.meta.appendChild(value);
-    if (data.source === "recent") {
+    if (inferred) {
       var note = el("span", TAG + "-meta-ver", "推断");
-      note.title = "页面拿不到 session id，按「最近使用的工作区」推断";
+      note.title = state.sessionId
+        ? "当前会话没有在 workspace.json 里登记，按最近使用的工作区推断；保存前请确认"
+        : "页面拿不到当前会话，按最近使用的工作区推断；保存前请确认";
       drawer.meta.appendChild(note);
     }
     if (data.dshVersion) drawer.meta.appendChild(el("span", TAG + "-meta-ver", "DSH " + data.dshVersion));
@@ -428,8 +467,10 @@ var state = { files: [], current: null, loaded: "", dirty: false, saving: false,
     drawer.editor.value = "";
     renderList();
     refreshFoot();
-    getJson(BASE + "/read?path=" + encodeURIComponent(file.path) + "&hint=" + encodeURIComponent(location.href))
+    var seq = ++readSeq;
+    getJson(BASE + "/read?path=" + encodeURIComponent(file.path) + "&hint=" + encodeURIComponent(hintValue()))
       .then(function (res) {
+        if (seq !== readSeq) return;
         if (!res.ok) {
           drawer.status.textContent = res.error || "读取失败";
           return;
@@ -447,9 +488,13 @@ var state = { files: [], current: null, loaded: "", dirty: false, saving: false,
 
   function save() {
     if (!state.current || state.saving) return;
+    if (state.projectSource !== "session") {
+      var where = state.project || "未知项目";
+      if (!window.confirm("当前项目是推断的：\n" + where + "\n\n确定写入这个项目的 AGENTS.md？")) return;
+    }
     state.saving = true;
     refreshFoot();
-    postJson(BASE + "/write", { path: state.current.path, content: drawer.editor.value, hint: location.href })
+    postJson(BASE + "/write", { path: state.current.path, content: drawer.editor.value, hint: hintValue() })
       .then(function (res) {
         state.saving = false;
         if (!res.ok) {
@@ -482,20 +527,62 @@ var state = { files: [], current: null, loaded: "", dirty: false, saving: false,
 
   // 把本面板的两条横线摆到和左侧那两条同高；文字贴底由 CSS 负责。
 
+  var sessionWatch = 0;
+
+  function stopSessionWatch() {
+    if (sessionWatch) {
+      clearInterval(sessionWatch);
+      sessionWatch = 0;
+    }
+  }
+
+  function syncSession() {
+    if (!drawer || !drawer.root.hasAttribute("data-open")) return;
+    var id = readSessionId();
+    if (id === state.sessionId) return;
+    state.sessionId = id;
+    if (state.dirty) {
+      state.projectSource = "stale";
+      drawer.status.textContent = "会话已切换，未保存改动仍在；保存前请确认项目";
+      return;
+    }
+    afterOpen();
+  }
+
+  function startSessionWatch() {
+    stopSessionWatch();
+    sessionWatch = setInterval(syncSession, SESSION_POLL_MS);
+  }
+
+  function onStorage(e) {
+    if (e.key === SESSION_KEY) syncSession();
+  }
+
+  window.addEventListener("storage", onStorage);
+
   function afterOpen() {
     if (!drawer) drawer = buildDrawer();
     drawer.root.setAttribute("data-open", "1");
+    state.sessionId = readSessionId();
+    state.project = "";
+    state.projectSource = "";
     /* backdrop stays hidden while docked so the composer keeps working */
     applyWidth(state.width, false);
     syncLayout();
+    startSessionWatch();
     drawer.status.textContent = "加载中…";
-    getJson(BASE + "/list?hint=" + encodeURIComponent(location.href))
+    var seq = ++listSeq;
+    readSeq++;
+    getJson(BASE + "/list?hint=" + encodeURIComponent(hintValue()))
       .then(function (data) {
+        if (seq !== listSeq) return;
         if (!data.ok) {
           drawer.status.textContent = data.error || "加载失败";
           return;
         }
         state.files = data.files || [];
+        state.project = data.project || "";
+        state.projectSource = data.source || "";
         renderMeta(data);
         renderList();
         var first = null;
@@ -644,6 +731,7 @@ var state = { files: [], current: null, loaded: "", dirty: false, saving: false,
 
   function closeDocked() {
     if (!drawer) return;
+    stopSessionWatch();
     lastSig = '';
     stopDockWatch();
     drawer.root.removeAttribute("data-open");
