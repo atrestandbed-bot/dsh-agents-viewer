@@ -438,14 +438,28 @@ export function apply(ctx) {
   };
 
   // 可热改的 CSS 覆盖层：每次 index 请求现读文件，改完刷新页面即可。
+  //
+  // 注意：这个回调在每次渲染 index 时同步执行，桌面端启动时的 welcome
+  // 认证（connectDesktopWelcome）拿到的也是这次响应。只要它抛错，index
+  // 就会变成 500，桌面端只会报
+  //   desktop welcome: Web authentication failed
+  // 然后整个 DSH 都打不开。插件绝不能有这种能力，所以这里全部兜住。
   ctx.on("webserver/index-inject", (table) => {
-    if (!Array.isArray(table)) return;
-    const css = readOverride();
-    if (css) table.push({ kind: "style", text: css });
+    try {
+      if (!Array.isArray(table)) return;
+      const css = readOverride();
+      if (typeof css === "string" && css.length > 0) table.push({ kind: "style", text: css });
+    } catch (error) {
+      console.warn("dsh-agents-viewer: index injection skipped:", error);
+    }
   });
 
   // ① 路由。
   ctx.inject(["webServer"], (child) => {
+    if (typeof child.webServer?.register !== "function") {
+      console.warn("dsh-agents-viewer: webServer.register unavailable; HTTP routes disabled");
+      return;
+    }
     child.effect(() => {
       const disposers = [];
 
@@ -563,6 +577,10 @@ export function apply(ctx) {
 
   // ② 命令。
   ctx.inject(["commands", "workingDirectory"], (child) => {
+    if (typeof child.commands?.register !== "function" || typeof child.workingDirectory?.ensure !== "function") {
+      console.warn("dsh-agents-viewer: commands/workingDirectory unavailable; /agents command disabled");
+      return;
+    }
     child.commands.register({
       name: "agents",
       description: "查看并编辑全局、共享与项目级的 AGENTS.md",

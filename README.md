@@ -2,7 +2,7 @@
 
 在 DSH（DeepSeek Harness）**右侧栏的原生 tab** 里查看和编辑 `AGENTS.md` 指令链 —— 聊天头部还有一个一键打开的按钮，外加一个 `/agents` 命令。
 
-> 需要带 `ctx.sidebarRightTabs` 的 DSH（44.7.0 已验证）。客户端通过公开的 tab 注册表接入，不再注入 UI 脚本/按钮，也不再猜项目；宿主只额外注入一层可热改的 CSS 覆盖。
+> 需要带 `ctx.sidebarRightTabs` 的 DSH。**0.2.2-rc.1（Electron 44.7.0）已验证**；`engines.dsh` 只保留下限 `>=0.2.2-rc.1`，`dsh.client.inject` 为空，服务全部在运行时探测。这样 DSH 小版本更新不需要改清单；真改了 API，最坏是少一个 tab，DSH 仍能启动。
 
 ## 功能
 
@@ -40,11 +40,69 @@ Copy-Item -Recurse -Force "<这个包的路径>" "$profile\node_modules\$name"
 # 2) 在 profile 的 package.json 里登记：
 #    dependencies 里加   "dsh-agents-viewer": "file:<这个包的绝对路径>"
 #    dsh.profile.bundles 末尾追加   "dsh-agents-viewer"
+#    注意：bundles 才是“启用”开关；只在 dependencies 里是“装了但没启用”。
 
 # 3) 重启 DSH（客户端 tab 的类型注册发生在启动时）
 ```
 
-改之前建议先备份 profile 的 `package.json` 和 `cordis.patch.yml`。
+更推荐直接用 DSH 的插件页安装这个包（会自动处理依赖和 bundles），或在本 checkout 里跑 `npm run adapt:install`。改之前建议先备份 profile 的 `package.json` 和 `cordis.patch.yml`。
+
+## 自动适配
+
+0.7.0 起，插件不再把 DSH 版本写死：
+
+- `dsh.client.inject` 为空：客户端只 `require("react")`（基座模块），不依赖任何 `@deepseek-ai/dsh-client-*` 包名；
+- `engines.dsh` 只留下限，不设上限；
+- 客户端只 Cordis-inject `slots`；`sidebarRightTabs` / `sidebarRight` 在 `apply` 里用 `ctx.inject` 按需等待。DSH 改名或删掉其中一个，只会少对应的入口，不会让插件永远 pending 或拖垮界面；
+- 宿主对 `webServer.register` / `commands.register` / `workingDirectory.ensure` 先判类型，缺了只打 warning；
+- `webserver/index-inject` 全包 try/catch，任何异常都不会把 index 变成 500。
+
+升级 DSH 后：
+
+```powershell
+npm run adapt          # 只检查：版本、engines、profile 副本是否一致
+# 退出 DSH 后，需要把本 checkout 同步进 profile 时：
+npm run adapt:install
+```
+
+`adapt:install` 会在 DSH 运行时**拒绝执行**，因为运行中替换插件文件可能触发客户端热重载、打断当前窗口；它同时会把旧的 `panel.js`、嵌套的 `runtime/runtime/` 等残留清掉。
+
+## 升级 DSH 后（手动检查）
+
+```powershell
+node scripts/check-compat.mjs
+# 或指定安装位置
+node scripts/check-compat.mjs --asar "D:/Program Files/DeepSeek Harness/resources/app.asar"
+```
+
+它会拿当前安装的 `app.asar` 核对 `dsh.client.inject` 里的每个包是否存在、`engines.dsh` 是否接受当前版本、客户端 bundle 是否还按 `window.__ModuleLoader__.load` 注册。DSH 改了模块名时，这里会先报 `FAIL`，而不是等 DSH 打不开才发现。
+
+## DSH 打不开时，先分清是谁的问题
+
+`desktop welcome: Web authentication failed` 这类启动失败**不是插件造成的**：
+
+- 崩溃报告在 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-host.log`。如果 `--- error ---` 是 `desktop welcome: Web authentication failed`，失败发生在桌面壳向自己刚启动的 Host 换 cookie/取 index 的那一步，插件还没参与。
+- 崩溃对话框里的「禁用第三方插件」会备份 `cordis.patch.yml` 并把 `dsh.profile.bundles` 重置为官方组合。**如果点完还继续崩，就证明与插件无关**——继续反复点、反复启动只会拉长故障时间。
+- 插件本身出问题时的表现完全不同：Host 仍会启动，日志里是 `dsh: warning: N entry did not activate`，界面只是少了这个 tab/按钮。宿主半和客户端半都做了兜底，单个注册失败不会影响 DSH 启动。
+
+真正需要检查的：是否有残留的 DSH 进程、更新下载后是否卡在安装交接（`%LOCALAPPDATA%\@deepseek-aidsh-desktop-updater\pending`）、以及本机的 `dsh-auth-*` cookie 是否已经堆到 16 KB。一次只启动一个实例，别在更新安装期间反复双击图标。
+
+### 另一种 `Web authentication failed`：cookie 431
+
+DSH Desktop 的 Host 每次用随机端口启动，而登录 cookie 名是 `dsh-auth-` + hash(`host:port`)。端口变一次就多一条 cookie，名字不复用；Chromium 又把 `127.0.0.1` 的所有 `dsh-auth-*` 一起塞进同一个 `Cookie` 头。约 70 次启动后请求头超过 Node 默认的 16 KB，Host 直接返回 431，桌面壳就报 `desktop welcome: Web authentication failed`。
+
+自查（先退出 DSH，cookie 库运行时被独占锁住）：
+
+```powershell
+$db = "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies"
+python -c "import sqlite3,sys;c=sqlite3.connect(sys.argv[1]);print(c.execute(\"select count(*) from cookies where name like 'dsh-auth-%'\").fetchone()[0])" $db
+```
+
+≥ 70 就要清。清理只删 `dsh-auth-*`、先备份，参考 [dsh-cookie-431](https://github.com/MCshamrock/dsh-cookie-431)。长期方案是在 profile patch 里把 `@deepseek-ai/dsh-client-connection` 的 `cookieMaxAgeDays` 从默认 30 改成 3（本机 profile 已经加上，见下面「改 profile」）。
+
+### 改 profile 必须退出 DSH
+
+桌面 profile 开着 HMR。运行中改 `cordis.patch.yml`（尤其 `connection`）或 `package.json` 的 bundles，会立即重载对应节点：当前浏览器连接被换掉，进行中的会话会以 `turn/end: aborted / disposed` 结束，窗口看起来就是「挂掉」。**改 profile 的 bundles、connection 或任何启动项前，先完整退出 DSH，改完再启动**；只改插件工作目录里的代码则可以热重载。
 
 ## 文件
 
@@ -53,6 +111,9 @@ index.js              宿主：HTTP 路由（/list /read /write /ui）+ /agents 
 runtime/client.js     客户端：sidebarRightTabs 注册 + tab 正文 + 头部按钮（手写 bundle，无构建）
 runtime/override.css  宿主每次 index 请求注入的 CSS 覆盖层（改完刷新即可）
 cordis.patch.yml      bundle 补丁：插入 dsh-agents-viewer 一行
+scripts/adapt-dsh.mjs 自动适配：检查运行时 / 版本 / profile 副本，可一键同步安装
+scripts/check-compat.mjs  清单核对（inject 包 / engines / client 入口）
+scripts/lib/dsh-runtime.mjs  asar 读取、semver、进程检测、profile 同步
 locale/*.json       插件管理器里显示的标题与描述
 icon.svg            图标
 ```
@@ -64,7 +125,8 @@ icon.svg            图标
 - **CSS 覆盖层**：`runtime/override.css` 由宿主在每次 index 请求时现读并注入 `<style>`；编辑器换行等样式改完刷新页面即可，不用重启。
 - **宿主**：`webServer.register` 暴露 `/dsh-agents-viewer/list`、`/read`、`/write`；`resolveProject(hint)` 从 `hint` 里的 `session-<uuid>` 反查 `~/.dsh/storages/workspace.json`。拿不到会话才退回最近工作区，并在 tab 上标「推断」、保存前确认。
 - **白名单**：全局 / 共享 + 项目根到 cwd 的目录链；其余路径一律 403。写盘是宿主进程直接 `fs.writeFileSync`，白名单是唯一入口。
-- **兼容性**：不再有 DOM 版本闸门；兼容性由 `sidebarRightTabs` 服务是否存在决定。DSH 升级后如果服务改名/变形，tab 不会注册，`/agents` 命令仍可用。
+- **兼容性**：`dsh.client.inject` 为空，`engines.dsh` 只有下限；客户端只 inject `slots`，`sidebarRightTabs` / `sidebarRight` 用嵌套 `ctx.inject` 按需等待，宿主对三个服务先判类型。DSH 改名/删服务时，对应入口不注册、打一条 warning，DSH 仍能启动，`/agents` 命令在其他入口失效时也照常可用。`webserver/index-inject` 和所有注册都做了 try/catch，插件永远不会把 index 打成 500。
+- **启动安全**：宿主插件加载失败只会让 DSH 打一条 `entry did not activate` 警告；`npm run adapt` 在升级 DSH 后核对版本/清单/profile 副本，`npm run adapt:install` 在 DSH 运行时拒绝执行，避免热替换打断窗口。
 
 ## 已知限制
 

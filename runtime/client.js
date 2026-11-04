@@ -442,55 +442,86 @@ window.__ModuleLoader__.load({
       };
     }
 
-    var inject = ["slots", "sidebarRightTabs", "sidebarRight"];
+    // 只把“所有版本都有”的 slots 写进 Cordis inject。sidebarRightTabs /
+    // sidebarRight 在 apply 里用 ctx.inject 按需等待：DSH 以后改名或删掉
+    // 其中一个，只少一个入口，不会让整个客户端插件永远 pending。
+    var inject = ["slots"];
+
+    // 单个注册失败只丢一个入口，不能让整个客户端插件挂掉；
+    // 否则 DSH 升级后这里一抛错，tab、按钮、命令会一起消失。
+    function guarded(label, install) {
+      try {
+        return install();
+      } catch (error) {
+        console.error("dsh-agents-viewer: " + label + " failed", error);
+        return void 0;
+      }
+    }
 
     function apply(ctx) {
-      openAgentsTab = function () {
-        var right = ctx.sidebarRight;
-        var active;
-        var expanded = false;
-        try {
-          active = right.active();
-          expanded = right.isExpanded();
-        } catch (error) {
-          /* 没有在屏会话时退回 openTab */
-        }
-        // 已经展开、且当前 tab 就是 AGENTS.md：再点一次收起侧栏。
-        if (expanded && active && active.kind === "agents") {
-          right.toggleExpanded();
-          return;
-        }
-        right.openTab("agents");
-      };
+      if (!ctx.slots || typeof ctx.slots.inject !== "function") {
+        console.warn("dsh-agents-viewer: slots service unavailable; plugin disabled");
+        return;
+      }
 
-      ctx.effect(function () {
-        return ctx.sidebarRightTabs.register(definition());
-      }, "dsh-agents-viewer: tab type");
-
-      ctx.effect(function () {
-        return ctx.slots.inject("sidebar.right.pane.tab", function () {
-          return ctx.slots.register(
-            {
-              name: "sidebar.right.pane.tab",
-              key: VIEW_ID,
-            },
-            AgentsBody,
-          );
+      guarded("tab type", function () {
+        ctx.inject(["sidebarRightTabs"], function (child) {
+          child.effect(function () {
+            return child.sidebarRightTabs.register(definition());
+          }, "dsh-agents-viewer: tab type");
         });
-      }, "dsh-agents-viewer: tab body");
+      });
 
-      ctx.effect(function () {
-        return ctx.slots.inject("conversation.session.header.utilities", function () {
-          return ctx.slots.register(
-            {
-              name: "conversation.session.header.utilities",
-              id: "agents-open",
-              order: -100,
-            },
-            AgentsHeaderButton,
-          );
+      guarded("tab body", function () {
+        ctx.effect(function () {
+          return ctx.slots.inject("sidebar.right.pane.tab", function () {
+            return ctx.slots.register(
+              {
+                name: "sidebar.right.pane.tab",
+                key: VIEW_ID,
+              },
+              AgentsBody,
+            );
+          });
+        }, "dsh-agents-viewer: tab body");
+      });
+
+      // 头部按钮和打开动作都绑在同一个 sidebarRight 服务上：服务在，
+      // 两样都有；服务不在，按钮也不注册，不会出现“点了没反应”。
+      guarded("header button", function () {
+        ctx.inject(["sidebarRight"], function (child) {
+          var right = child.sidebarRight;
+          openAgentsTab = function () {
+            if (!right || typeof right.openTab !== "function") return;
+            var active;
+            var expanded = false;
+            try {
+              active = right.active();
+              expanded = right.isExpanded();
+            } catch (error) {
+              /* 没有在屏会话时退回 openTab */
+            }
+            // 已经展开、且当前 tab 就是 AGENTS.md：再点一次收起侧栏。
+            if (expanded && active && active.kind === "agents") {
+              right.toggleExpanded();
+              return;
+            }
+            right.openTab("agents");
+          };
+          child.effect(function () {
+            return child.slots.inject("conversation.session.header.utilities", function () {
+              return child.slots.register(
+                {
+                  name: "conversation.session.header.utilities",
+                  id: "agents-open",
+                  order: -100,
+                },
+                AgentsHeaderButton,
+              );
+            });
+          }, "dsh-agents-viewer: header button");
         });
-      }, "dsh-agents-viewer: header button");
+      });
     }
 
     exports.apply = apply;

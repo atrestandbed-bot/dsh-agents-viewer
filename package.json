@@ -1,6 +1,6 @@
 {
   "name": "dsh-agents-viewer",
-  "version": "0.5.3",
+  "version": "0.7.0",
   "type": "module",
   "description": "查看并编辑全局、共享与项目级的 AGENTS.md：右侧栏原生 tab + 头部按钮 + /agents 命令",
   "keywords": [
@@ -33,19 +33,22 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
+    "scripts",
     "README.md"
   ],
+  "engines": {
+    "dsh": ">=0.2.2-rc.1"
+  },
+  "scripts": {
+    "check": "node scripts/check-compat.mjs",
+    "adapt": "node scripts/adapt-dsh.mjs",
+    "adapt:install": "node scripts/adapt-dsh.mjs --install"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
-      "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-sidebar-right",
-        "@deepseek-ai/dsh-client-ui-session"
-      ],
       "platform": "web"
     }
   }
