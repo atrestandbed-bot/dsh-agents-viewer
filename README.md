@@ -2,7 +2,9 @@
 
 在 DSH（DeepSeek Harness）**右侧栏的原生 tab** 里查看和编辑 `AGENTS.md` 指令链 —— 聊天头部还有一个一键打开的按钮，外加一个 `/agents` 命令。
 
-> 需要带 `ctx.sidebarRightTabs` 的 DSH。**0.2.2-rc.1（Electron 44.7.0）已验证**；`engines.dsh` 只保留下限 `>=0.2.2-rc.1`，`dsh.client.inject` 为空，服务全部在运行时探测。这样 DSH 小版本更新不需要改清单；真改了 API，最坏是少一个 tab，DSH 仍能启动。
+> 需要带 `ctx.sidebarRightTabs` 的 DSH。**0.2.2-rc.1（Electron 44.7.0）已验证**；2026-11-11 在 dshmarket 1.73.10 / billion-context 0.1.213 / @michengai/dsh-archive-manager 1.2.8 的同环境复测，tab、头部按钮、`/agents` 均正常；2026-11-14 再次复测 tab 与头部按钮正常。`engines.dsh` 只保留下限 `>=0.2.2-rc.1`，`dsh.client.inject` 为空，服务全部在运行时探测。这样 DSH 小版本更新不需要改清单；真改了 API，最坏是少一个 tab，DSH 仍能启动。
+>
+> 如果更新后 DSH 启动又报 `desktop welcome: Web authentication failed`（cookie 超过 16 KB 的 431），先完整退出 DSH，运行 `node scripts/ensure-cookie-cap.mjs`，把 `connection.cookieMaxAgeDays` 补回 profile 的 `cordis.patch.yml`。
 
 ## 功能
 
