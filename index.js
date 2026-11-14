@@ -361,7 +361,12 @@ function instructionEntries(projectPath) {
   return { list, root };
 }
 
-const normalize = (p) => path.resolve(String(p)).toLowerCase();
+// Windows 文件系统不区分大小写，比较前统一小写；其它平台按原样比较，
+// 避免把 /p/AGENTS.md 和 /p/agents.md 当成同一个文件。
+const normalize = (p) => {
+  const resolved = path.resolve(String(p));
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+};
 
 // ── 聊天头部按钮的开关 ────────────────────────────────────────────────
 
