@@ -2,7 +2,7 @@
 
 在 DSH（DeepSeek Harness）**右侧栏的原生 tab** 里查看和编辑 `AGENTS.md` 指令链 —— 聊天头部还有一个一键打开的按钮，外加一个 `/agents` 命令。
 
-> 需要带 `ctx.sidebarRightTabs` 的 DSH。**0.2.2-rc.1（Electron 44.7.0）已验证**；2026-11-11 在 dshmarket 1.73.10 / billion-context 0.1.213 / @michengai/dsh-archive-manager 1.2.8 的同环境复测，tab、头部按钮、`/agents` 均正常；2026-11-14 再次复测 tab 与头部按钮正常。`engines.dsh` 只保留下限 `>=0.2.2-rc.1`，`dsh.client.inject` 为空，服务全部在运行时探测。这样 DSH 小版本更新不需要改清单；真改了 API，最坏是少一个 tab，DSH 仍能启动。
+> 实测版本 **DSH 0.2.2-rc.3（Electron 44.7.0）**，允许安装的最低版本 `engines.dsh >=0.2.1-rc.1`（0.7.2 起，见下面「版本兼容」）。2026-11-11 在 dshmarket 1.73.10 / billion-context 0.1.213 / @michengai/dsh-archive-manager 1.2.8 的同环境复测，tab、头部按钮、`/agents` 均正常；2026-11-14 再次复测 tab 与头部按钮正常。`dsh.client.inject` 为空，服务全部在运行时探测：DSH 小版本更新不需要改清单；真改了 API，最坏是少一个 tab，DSH 仍能启动。
 >
 > 如果更新后 DSH 启动又报 `desktop welcome: Web authentication failed`（cookie 超过 16 KB 的 431），先完整退出 DSH，运行 `node scripts/ensure-cookie-cap.mjs`，把 `connection.cookieMaxAgeDays` 补回 profile 的 `cordis.patch.yml`。
 
@@ -49,12 +49,38 @@ Copy-Item -Recurse -Force "<这个包的路径>" "$profile\node_modules\$name"
 
 更推荐直接用 DSH 的插件页安装这个包（会自动处理依赖和 bundles），或在本 checkout 里跑 `npm run adapt:install`。改之前建议先备份 profile 的 `package.json` 和 `cordis.patch.yml`。
 
+## 版本兼容
+
+DSH 的插件安装闸门只看 `engines.dsh`：pnpm 装完后会跑一次 `semver.satisfies(runtime, range, { includePrerelease: true })`，不满足就把 `package.json` / `pnpm-lock.yaml` 回滚，报 `installation rejected: Plugin ... is incompatible with dsh ...`。所以清单里的下限是「谁能装」的硬边界，不是说明文字。
+
+| | 版本 |
+|---|---|
+| 实测通过 | `0.2.2-rc.3`（桌面版，Electron 44.7.0） |
+| 允许安装 | `>=0.2.1-rc.1` |
+| 低于此版本 | 安装器会直接拒绝，不是插件的问题 |
+
+0.7.2 把下限从 `>=0.2.2-rc.1` 降到 `>=0.2.1-rc.1`。0.7.x 的代码本来就是按「服务缺失就退一个入口」写的：宿主先判 `webServer` / `commands` / `workingDirectory` 的类型，客户端只 inject `slots`，`sidebarRightTabs` / `sidebarRight` 用嵌套 `ctx.inject` 等。所以跑在 0.2.1 线上最坏是**少一个入口**，不会拖垮启动：
+
+| 服务 | 缺失时的表现 |
+|---|---|
+| `webServer` | 打 warning，tab 正文读不到文件；`/agents` 仍可用 |
+| `commands` + `workingDirectory` | 打 warning，`/agents` 消失；tab 仍可用 |
+| `sidebarRightTabs` + `sidebar.right.pane.tab` | 只少 tab，头部按钮和命令不受影响 |
+
+这套降级是**设计保证**，不是实测结论：0.2.1 线没法在本机复现，只有 `0.2.2-rc.3` 实际跑过。要确认某个版本能否安装，不用那台机器：
+
+```powershell
+node scripts/check-compat.mjs --runtime-version 0.2.1-rc.5
+```
+
+已经装了 0.7.1 又不想升 DSH 的人，两条路：升到 `>=0.2.2-rc.1`，或对**精确版本对**授予豁免（`dsh plugin allow-version` / 插件管理器里的 exact-version exemption）。豁免不跨版本，每发一版都要重新授一次，所以不如直接换 0.7.2。
+
 ## 自动适配
 
 0.7.0 起，插件不再把 DSH 版本写死：
 
 - `dsh.client.inject` 为空：客户端只 `require("react")`（基座模块），不依赖任何 `@deepseek-ai/dsh-client-*` 包名；
-- `engines.dsh` 只留下限，不设上限；
+- `engines.dsh` 只留下限（当前 `>=0.2.1-rc.1`），不设上限；
 - 客户端只 Cordis-inject `slots`；`sidebarRightTabs` / `sidebarRight` 在 `apply` 里用 `ctx.inject` 按需等待。DSH 改名或删掉其中一个，只会少对应的入口，不会让插件永远 pending 或拖垮界面；
 - 宿主对 `webServer.register` / `commands.register` / `workingDirectory.ensure` 先判类型，缺了只打 warning；
 - `webserver/index-inject` 全包 try/catch，任何异常都不会把 index 变成 500。
@@ -75,9 +101,11 @@ npm run adapt:install
 node scripts/check-compat.mjs
 # 或指定安装位置
 node scripts/check-compat.mjs --asar "D:/Program Files/DeepSeek Harness/resources/app.asar"
+# 或不读安装，只问"这个清单能装进某个 DSH 版本吗"
+node scripts/check-compat.mjs --runtime-version 0.2.1-rc.5
 ```
 
-它会拿当前安装的 `app.asar` 核对 `dsh.client.inject` 里的每个包是否存在、`engines.dsh` 是否接受当前版本、客户端 bundle 是否还按 `window.__ModuleLoader__.load` 注册。DSH 改了模块名时，这里会先报 `FAIL`，而不是等 DSH 打不开才发现。
+它会拿当前安装的 `app.asar` 核对 `dsh.client.inject` 里的每个包是否存在、`engines.dsh` 是否接受当前版本、客户端 bundle 是否还按 `window.__ModuleLoader__.load` 注册。DSH 改了模块名时，这里会先报 `FAIL`，而不是等 DSH 打不开才发现。`--runtime-version` 跳过 asar，只做安装闸门那一项比较，用来回答「老版本 DSH 能不能装这个包」。
 
 ## DSH 打不开时，先分清是谁的问题
 
@@ -114,7 +142,7 @@ runtime/client.js     客户端：sidebarRightTabs 注册 + tab 正文 + 头部�
 runtime/override.css  宿主每次 index 请求注入的 CSS 覆盖层（改完刷新即可）
 cordis.patch.yml      bundle 补丁：插入 dsh-agents-viewer 一行
 scripts/adapt-dsh.mjs 自动适配：检查运行时 / 版本 / profile 副本，可一键同步安装
-scripts/check-compat.mjs  清单核对（inject 包 / engines / client 入口）
+scripts/check-compat.mjs  清单核对（inject 包 / engines / client 入口），可 --runtime-version 模拟旧版
 scripts/lib/dsh-runtime.mjs  asar 读取、semver、进程检测、profile 同步
 locale/*.json       插件管理器里显示的标题与描述
 icon.svg            图标
