@@ -126,6 +126,7 @@ icon.svg            图标
 - **头部按钮**：注册进 `conversation.session.header.utilities`（list 槽，`order: -100`），位置在文件/侧栏按钮那一簇的左边。点击时：侧栏收起 → `openTab('agents')`；已展开且当前 tab 是 `agents` → `toggleExpanded()` 收起；展开但是别的 tab → 切到 `agents`。`/agents o` / `c` 只写 `~/.dsh/storages/dsh-agents-viewer.ui.json`，按钮在页面加载时读一次 `/ui`，所以显隐下次启动/刷新生效。
 - **CSS 覆盖层**：`runtime/override.css` 由宿主在每次 index 请求时现读并注入 `<style>`；编辑器换行等样式改完刷新页面即可，不用重启。
 - **宿主**：`webServer.register` 暴露 `/dsh-agents-viewer/list`、`/read`、`/write`；`resolveProject(hint)` 从 `hint` 里的 `session-<uuid>` 反查 `~/.dsh/storages/workspace.json`。拿不到会话才退回最近工作区，并在 tab 上标「推断」、保存前确认。
+- **访问检查**：四个路由都先调用宿主的 `connection.requestRejection(req)`（Host/Origin 围栏 + 浏览器登录态），未登录或来源不受信时按宿主返回的 401/403 拒绝；`connection` 服务不存在时保持原行为。
 - **白名单**：全局 / 共享 + 项目根到 cwd 的目录链；其余路径一律 403。写盘是宿主进程直接 `fs.writeFileSync`，白名单是唯一入口。
 - **兼容性**：`dsh.client.inject` 为空，`engines.dsh` 只有下限；客户端只 inject `slots`，`sidebarRightTabs` / `sidebarRight` 用嵌套 `ctx.inject` 按需等待，宿主对三个服务先判类型。DSH 改名/删服务时，对应入口不注册、打一条 warning，DSH 仍能启动，`/agents` 命令在其他入口失效时也照常可用。`webserver/index-inject` 和所有注册都做了 try/catch，插件永远不会把 index 打成 500。
 - **启动安全**：宿主插件加载失败只会让 DSH 打一条 `entry did not activate` 警告；`npm run adapt` 在升级 DSH 后核对版本/清单/profile 副本，`npm run adapt:install` 在 DSH 运行时拒绝执行，避免热替换打断窗口。

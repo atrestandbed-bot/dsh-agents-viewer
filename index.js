@@ -406,6 +406,20 @@ function sendJson(res, status, body) {
   res.end(text);
 }
 
+/**
+ * 宿主自带的请求闸门（Host/Origin 围栏 + 浏览器登录态）。
+ * 未登录或来源不受信时返回 401/403；正常请求返回 undefined。
+ * 服务不存在时返回 undefined，插件在旧宿主上仍按原来的行为工作。
+ */
+function hostRejection(ctx, req) {
+  try {
+    const gate = ctx.get?.("connection")?.requestRejection;
+    return typeof gate === "function" ? gate(req) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -454,6 +468,10 @@ export function apply(ctx) {
     }
   });
 
+  // 所有 HTTP 路由都先过宿主的请求闸门：没登录的浏览器、以及 Host/Origin
+  // 不在信任名单里的请求，直接按宿主给的状态码拒绝，不进入读写逻辑。
+  const refusal = (req) => hostRejection(ctx, req);
+
   // ① 路由。
   ctx.inject(["webServer"], (child) => {
     if (typeof child.webServer?.register !== "function") {
@@ -469,6 +487,11 @@ export function apply(ctx) {
           path: `${ROUTE_PREFIX}/list`,
           handler: (req, res) => {
             try {
+              const denied = refusal(req);
+              if (denied) {
+                sendJson(res, denied, { ok: false, error: "需要先登录 DSH 才能读取 AGENTS.md。" });
+                return;
+              }
               const url = new URL(req.url ?? "/", "http://127.0.0.1");
               const project = resolveProject(url.searchParams.get("hint") ?? "");
               const { list, root } = instructionEntries(project.path);
@@ -503,6 +526,11 @@ export function apply(ctx) {
           path: `${ROUTE_PREFIX}/read`,
           handler: (req, res) => {
             try {
+              const denied = refusal(req);
+              if (denied) {
+                sendJson(res, denied, { ok: false, error: "需要先登录 DSH 才能读取 AGENTS.md。" });
+                return;
+              }
               const url = new URL(req.url ?? "/", "http://127.0.0.1");
               const target = url.searchParams.get("path") ?? "";
               const project = resolveProject(url.searchParams.get("hint") ?? "");
@@ -526,6 +554,11 @@ export function apply(ctx) {
           path: `${ROUTE_PREFIX}/write`,
           handler: async (req, res) => {
             try {
+              const denied = refusal(req);
+              if (denied) {
+                sendJson(res, denied, { ok: false, error: "需要先登录 DSH 才能写入 AGENTS.md。" });
+                return;
+              }
               if (String(req.method ?? "GET").toUpperCase() !== "POST") {
                 sendJson(res, 405, { ok: false, error: "只接受 POST" });
                 return;
@@ -555,6 +588,11 @@ export function apply(ctx) {
           path: `${ROUTE_PREFIX}/ui`,
           handler: (req, res) => {
             try {
+              const denied = refusal(req);
+              if (denied) {
+                sendJson(res, denied, { ok: false, error: "需要先登录 DSH。" });
+                return;
+              }
               sendJson(res, 200, { ok: true, ...currentUiState() });
             } catch (error) {
               sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) });
